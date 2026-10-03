@@ -1,0 +1,17 @@
+# Secrets 
+**/secrets.h
+**/*token*
+**/*password*
+**/.env
+**/wifi_credentials.h
+**/twilio_credentials.h
+
+# OS noise
+.DS_Store
+Thumbs.db
+*.swp
+*~
+
+# Optional large media 
+# *.mp4
+# *.mov
