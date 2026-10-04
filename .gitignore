@@ -15,3 +15,5 @@ Thumbs.db
 # Optional large media 
 # *.mp4
 # *.mov
+
+secrets.h
