@@ -5,6 +5,7 @@
 #include <HTTPClient.h>
 #include "Arduino_BMI270_BMM150.h"
 #include <SPI.h>
+#include "secrets.h"
 
 #define AIO_NO_SSL
 #include "AdafruitIO_WiFi.h"
@@ -22,17 +23,8 @@
 const char* ssid = "MSetup";
 const char* password = "";
 
-#define SENDER_EMAIL "sai.ghattamaneni05@gmail.com"
-#define SENDER_PASSWORD "ksks dpcm clia ggda"
-
-#define RECIPIENT_EMAIL "hrithika058@gmail.com"
-
 SMTPSession smtp;
 bool fallSent = false;
-
-// Adafruit IO
-#define IO_USERNAME  "meghanas7"
-#define IO_KEY       "aio_ILpm68hQlJhf2Xz1NYyJIteZk9Bc"
 
 AdafruitIO_WiFi io(IO_USERNAME, IO_KEY, ssid, password);
 AdafruitIO_Feed *analogFeed = io.feed("cane-test");
