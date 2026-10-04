@@ -6,6 +6,7 @@
 // #include <SD.h>
 // #include "FS.h"
 #include <WiFi.h>
+#define AIO_NO_SSL
 #include "AdafruitIO_WiFi.h"
 
 /* Usage Notes
@@ -147,25 +148,28 @@ bool ledValue = 0;
 // File myFile;
 
 // WiFi
-const char* ssid = "Meghana's Phone";
-const char* password = "Password"; //change to hotspot and password
+const char* ssid = "MSetup";
+const char* password = ""; //change to hotspot and password
 
 // Adafruit IO
 #define IO_USERNAME  "meghanas7"
-#define IO_KEY       "aio_WhJz83NUAjkKi1hnHBJq33B42Q1Q"
+#define IO_KEY       "aio_ILpm68hQlJhf2Xz1NYyJIteZk9Bc"
 
 AdafruitIO_WiFi io(IO_USERNAME, IO_KEY, ssid, password);
-AdafruitIO_Feed *analogFeed = io.feed("Cane_Test");
+AdafruitIO_Feed *analogFeed = io.feed("cane-test");
 
 // Set the interval to send data to Adafruit IO
 unsigned long lastSend = 0;
-const unsigned long sendInterval = 1000; // 10 seconds
+const unsigned long sendInterval = 10000; 
 
 
 //Function Declarations: It's a C thing
 // void ReadTemperatureSensor();
 void ReadAcceleration();
 void ReadGyroscope();
+void ReadTouchSensor();
+
+bool isHandOnHandle();
 // void ReadColorPrxSensor();
 // void SDCardReadWrite();
 // void PrintCurrentSPIPins();
@@ -186,103 +190,81 @@ void ReadGyroscope();
 void setup() 
 {
   Serial.begin(115200);
+  delay(2000); // Allow Serial Monitor to connect
+
+  Serial.println("\n--- STARTING CONNECTION PIPELINE ---");
+
   pinMode(USR_LED_PIN, OUTPUT);
-  digitalWrite(USR_LED_PIN, LOW);
+  digitalWrite(USR_LED_PIN, HIGH);
 
   analogReadResolution(12);
 
-  // Set up the new I2C pins
-  Wire.begin(I2C_SDA, I2C_SCL); // Do this everytime you want to use an I2C device. Well, you are limited to 3 on this device. 
-                                // But you are able to add more I2C devices with the jumpers on board and adding external devices
+  Wire.end();
+  Wire.begin(I2C_SDA, I2C_SCL); 
+  IMU.begin();
 
-  // // Temperature Sensor Test (SHTC3)
-  // errorDecoder(tempSensor.begin()); // Start Sensor
+  Serial.println("1. IMU Initialized.");
 
-  // IMU Init
-  if (!IMU.begin()) 
-  {
-    Serial.println("Failed to initialize IMU!");
-    while (1);
-  }
-  Serial.print("Accelerometer sample rate = ");
-  Serial.print(IMU.accelerationSampleRate());
-  Serial.println(" Hz");
-  Serial.println();
-  Serial.println("Acceleration in G's");
-  Serial.println("X\tY\tZ");
+  // Force clean Wi-Fi state for iPhone hotspot compatibility
+  WiFi.disconnect(true);
+  delay(1000);
+  WiFi.mode(WIFI_STA);
+  WiFi.setMinSecurity(WIFI_AUTH_WPA2_PSK);
 
-  Serial.print("Gyroscope sample rate = ");
-  Serial.print(IMU.gyroscopeSampleRate());
-  Serial.println(" Hz");
-  Serial.println();
-  Serial.println("Gyroscope in degrees/second");
-  Serial.println("X\tY\tZ");
+  Serial.print("2. Connecting via Adafruit IO to SSID: ");
+  Serial.println(ssid);
 
-  // Connect to WiFi
-  // WiFi.mode(WIFI_STA);
-  // WiFi.begin(ssid, password);
-  // while (WiFi.status() != WL_CONNECTED) 
-  // {
-  //   delay(500);
-  //   Serial.print(".");
-  // }
-  // Serial.println("WiFi connected");
-
-  Serial.println("Connecting to Adafruit IO...");
+  // Adafruit IO will automatically manage Wi-Fi + MQTT connections
   io.connect();
 
-  while (io.status() < AIO_CONNECTED) {
+  while (io.status() < AIO_CONNECTED) 
+  {
     io.run();
-    delay(500);
-    Serial.print(".");
+    Serial.print("   Current AIO Status: ");
+    Serial.println(io.statusText());
+    delay(1000);
   }
-  Serial.println("\nConnected!");
 
-    // --- DISPLAY THE IP ADDRESS ---
-  Serial.print("IP address: ");
+  Serial.println("3. FULLY CONNECTED TO WI-FI & ADAFRUIT IO!");
+  Serial.print("   IP Address: ");
   Serial.println(WiFi.localIP());
 
-  // // Gesture/Color/Light and Proximity Sensor Init
-  // if (!APDS.begin()) {
-  //   Serial.println("Error initializing APDS-9960 sensor.");
-  //   while (true); // Stop forever
-  // }
-
-  // SPI SD Card
-  // PrintCurrentSPIPins(); // Just so that you can see the current SPI pins
-  // Read note at the bottom about SD Cards
-  // SDCardReadWrite();  // SD Card Demo
-  delay(2000);
+  digitalWrite(USR_LED_PIN, LOW);
 }
 
 void loop() 
 {
+  // Process Adafruit IO tasks
   io.run();
+
+  // Toggle USR LED to show loop is active
   ledValue = !ledValue;
   digitalWrite(USR_LED_PIN, ledValue);
 
-  int handle_sensor_reading = analogRead(SD_CARD_Detect_PIN);
-  uint32_t handle_sensor_reading_mv = analogReadMilliVolts(SD_CARD_Detect_PIN);
-
-  Serial.print("Raw: ");
-  Serial.print(handle_sensor_reading);
-  Serial.print("  mV: ");
-  Serial.println(handle_sensor_reading_mv);
-  // Uncomment the functions to read sensor data
-
-  //ReadTemperatureSensor();
+  // Read and plot acceleration data on Serial Plotter
   ReadAcceleration();
-  // ReadGyroscope();
-  //ReadColorPrxSensor();
+  // Read and plot gyro data on Serial Plotter
+  ReadGyroscope();
+  // Read touch sensor
+  ReadTouchSensor();
 
-  //Update Adafruit IO
+  // Send to Adafruit IO every 10 seconds ONLY if connected
   if (millis() - lastSend >= sendInterval) 
   {
     lastSend = millis();
-    analogFeed->save((int)handle_sensor_reading);
+    
+    if (io.status() == AIO_CONNECTED) 
+    {
+      int handle_sensor_reading = analogRead(SD_CARD_Detect_PIN);
+      analogFeed->save(handle_sensor_reading);
+    } 
+    else 
+    {
+      Serial.println("Wi-Fi/AIO not connected yet, skipping cloud send...");
+    }
   }
 
-  delay(100);
+  delay(10);
 }
 
 // void ReadTemperatureSensor()
@@ -311,33 +293,47 @@ void loop()
 // Example Code from Arduino Library
 void ReadAcceleration()
 {
-  float x, y, z;
+  float ax = 0, ay = 0, az = 0;
 
   if (IMU.accelerationAvailable())
   {
-    IMU.readAcceleration(x, y, z);
-    //Serial.print("Accel: ");
-    Serial.print(x);
-    Serial.print('\t');
-    Serial.print(y);
-    Serial.print('\t');
-    Serial.println(z);
+    IMU.readAcceleration(ax, ay, az);
+    float total_g = sqrt(ax * ax + ay * ay + az * az);
+
+    // Formatted key:value format for Arduino Serial Plotter
+    Serial.print("Ax:"); Serial.print(ax, 2);
+    Serial.print("\tAy:"); Serial.print(ay, 2);
+    Serial.print("\tAz:"); Serial.print(az, 2);
+    Serial.print("\tTotal_g:"); Serial.print(total_g, 2);
   }
 }
 void ReadGyroscope()
 {
-  float x, y, z;
+  float gx = 0, gy = 0, gz = 0;
 
   if (IMU.gyroscopeAvailable()) {
-    IMU.readGyroscope(x, y, z);
+    IMU.readGyroscope(gx, gy, gz);
+    float total_gyro = sqrt(gx * gx + gy * gy + gz * gz);
 
     //Serial.print("Gyro: ");
-    Serial.print(x);
-    Serial.print('\t');
-    Serial.print(y);
-    Serial.print('\t');
-    Serial.println(z);
+    Serial.print("\tGx:"); Serial.print(gx, 2);
+    Serial.print("\tGy:"); Serial.print(gy, 2);
+    Serial.print("\tGz:"); Serial.print(gz, 2);
+    Serial.print("\tTotal_deg:"); Serial.println(total_gyro, 2);
   }
+}
+void ReadTouchSensor()
+{
+  int rawTouch = analogRead(SD_CARD_Detect_PIN);
+
+  Serial.print("Touch Raw: ");
+  Serial.println(rawTouch);
+}
+
+bool isHandOnHandle()
+{
+  int rawTouch = analogRead(SD_CARD_Detect_PIN);
+  return (rawTouch < 2400);
 }
 
 // void ReadColorPrxSensor()
