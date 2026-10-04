@@ -162,6 +162,23 @@ AdafruitIO_Feed *analogFeed = io.feed("cane-test");
 unsigned long lastSend = 0;
 const unsigned long sendInterval = 10000; 
 
+// State machine definitions
+enum CaneState {
+  STATE_NORMAL,
+  STATE_FREEFALL,
+  STATE_IMPACT,
+  STATE_FALL_CONFIRMED
+}
+
+CaneState currentState = STATE_NORMAL;
+unsigned long = freefallStartTime = 0;
+
+// Emperical thresholds
+const int TOUCH_THRESHOLD = 2400;
+const float FREEFALL_G_LIMIT = 0.60;
+const float IMPACT_G_LIMIT = 1.50;
+const float ROTATION_LIMIT = 150.0;
+
 
 //Function Declarations: It's a C thing
 // void ReadTemperatureSensor();
@@ -232,39 +249,64 @@ void setup()
   digitalWrite(USR_LED_PIN, LOW);
 }
 
+// Diagnostic variables for Phase 3 drop capture
+float min_g_recorded = 99.0;
+float max_g_recorded = 0.0;
+float max_gyro_recorded = 0.0;
+bool motion_detected = false;
+
 void loop() 
 {
-  // Process Adafruit IO tasks
-  io.run();
+  float ax = 0, ay = 0, az = 0;
+  float gx = 0, gy = 0, gz = 0;
 
-  // Toggle USR LED to show loop is active
-  ledValue = !ledValue;
-  digitalWrite(USR_LED_PIN, ledValue);
-
-  // Read and plot acceleration data on Serial Plotter
-  ReadAcceleration();
-  // Read and plot gyro data on Serial Plotter
-  ReadGyroscope();
-  // Read touch sensor
-  ReadTouchSensor();
-
-  // Send to Adafruit IO every 10 seconds ONLY if connected
-  if (millis() - lastSend >= sendInterval) 
+  // Read raw values as fast as possible
+  if (IMU.accelerationAvailable() && IMU.gyroscopeAvailable()) 
   {
-    lastSend = millis();
-    
-    if (io.status() == AIO_CONNECTED) 
+    IMU.readAcceleration(ax, ay, az);
+    IMU.readGyroscope(gx, gy, gz);
+
+    float total_g = sqrt(ax * ax + ay * ay + az * az);
+    float total_gyro = sqrt(gx * gx + gy * gy + gz * gz);
+    int rawTouch = analogRead(SD_CARD_Detect_PIN);
+
+    // Track dynamic extremes
+    if (total_g < min_g_recorded) min_g_recorded = total_g;
+    if (total_g > max_g_recorded) max_g_recorded = total_g;
+    if (total_gyro > max_gyro_recorded) max_gyro_recorded = total_gyro;
+
+    // Trigger instant print ONLY when dynamic motion happens (<0.6g freefall OR >1.8g impact)
+    if (total_g < 0.60 || total_g > 1.80 || total_gyro > 50.0) 
     {
-      int handle_sensor_reading = analogRead(SD_CARD_Detect_PIN);
-      analogFeed->save(handle_sensor_reading);
-    } 
-    else 
-    {
-      Serial.println("Wi-Fi/AIO not connected yet, skipping cloud send...");
+      Serial.print(">>> EVENT DETECTED! Total_g: ");
+      Serial.print(total_g, 2);
+      Serial.print("g | Gyro: ");
+      Serial.print(total_gyro, 1);
+      Serial.print(" deg/s | Touch: ");
+      Serial.println(rawTouch);
+      
+      motion_detected = true;
     }
   }
 
-  delay(10);
+  // Every 3 seconds, print the absolute min/max baseline summary
+  static unsigned long lastSummary = 0;
+  if (millis() - lastSummary > 3000) 
+  {
+    lastSummary = millis();
+    Serial.print("[SUMMARY] Min_g: ");
+    Serial.print(min_g_recorded, 2);
+    Serial.print("g | Max_g: ");
+    Serial.print(max_g_recorded, 2);
+    Serial.print("g | Max_Gyro: ");
+    Serial.print(max_gyro_recorded, 1);
+    Serial.println(" deg/s");
+
+    // Reset trackers for the next drop test
+    min_g_recorded = 99.0;
+    max_g_recorded = 0.0;
+    max_gyro_recorded = 0.0;
+  }
 }
 
 // void ReadTemperatureSensor()
