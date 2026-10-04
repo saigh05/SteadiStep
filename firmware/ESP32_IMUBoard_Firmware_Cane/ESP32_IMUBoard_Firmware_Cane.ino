@@ -168,10 +168,10 @@ enum CaneState {
   STATE_FREEFALL,
   STATE_IMPACT,
   STATE_FALL_CONFIRMED
-}
+};
 
 CaneState currentState = STATE_NORMAL;
-unsigned long = freefallStartTime = 0;
+unsigned long freefallStartTime = 0;
 
 // Emperical thresholds
 const int TOUCH_THRESHOLD = 2400;
@@ -187,6 +187,7 @@ void ReadGyroscope();
 void ReadTouchSensor();
 
 bool isHandOnHandle();
+void ProcessFallDetection(float total_g, float total_gyro, int rawTouch);
 // void ReadColorPrxSensor();
 // void SDCardReadWrite();
 // void PrintCurrentSPIPins();
@@ -269,6 +270,8 @@ void loop()
     float total_g = sqrt(ax * ax + ay * ay + az * az);
     float total_gyro = sqrt(gx * gx + gy * gy + gz * gz);
     int rawTouch = analogRead(SD_CARD_Detect_PIN);
+
+    ProcessFallDetection(total_g, total_gyro, rawTouch);
 
     // Track dynamic extremes
     if (total_g < min_g_recorded) min_g_recorded = total_g;
@@ -376,6 +379,45 @@ bool isHandOnHandle()
 {
   int rawTouch = analogRead(SD_CARD_Detect_PIN);
   return (rawTouch < 2400);
+}
+
+void ProcessFallDetection(float total_g, float total_gyro, int rawTouch)
+{
+  bool handOn = (rawTouch < TOUCH_THRESHOLD);
+
+  switch (currentState) {
+    case STATE_NORMAL:
+      if (!handOn && total_g < FREEFALL_G_LIMIT && total_gyro > ROTATION_LIMIT) {
+        freefallStartTime = millis();
+        currentState = STATE_FREEFALL;
+        Serial.println("\n[STATE] -> FREFALL DETECTED!");
+      }
+      break;
+
+    case STATE_FREEFALL:
+      if (total_g > IMPACT_G_LIMIT) {
+        currentState = STATE_IMPACT;
+        Serial.println("[STATE] -> IMPACT DETECTED!");
+      } else if (millis() - freefallStartTime > 1500) {
+        currentState = STATE_NORMAL;
+        Serial.println("[STATE] -> FREEFALL TIMEOUT (Reset to NORMAL)");
+      }
+      break;
+
+    case STATE_IMPACT:
+      currentState = STATE_FALL_CONFIRMED;
+      Serial.println("==========================================");
+      Serial.println("!!! FALL EVENT CONFIRMED !!!");
+      Serial.println("==========================================");
+      break;
+
+    case STATE_FALL_CONFIRMED:
+      if (handOn) {
+        currentState = STATE_NORMAL;
+        Serial.println("[STATE] -> Handle grasped again. Resetting to NORMAL.\n");
+      }
+      break;
+  }
 }
 
 // void ReadColorPrxSensor()
